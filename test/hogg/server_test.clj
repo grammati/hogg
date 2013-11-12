@@ -2,7 +2,9 @@
   (:require [clojure.test :refer :all]
             [hogg.server :as server]
             [org.httpkit.server :refer [run-server]]
-            [cheshire.core :as json])
+            [clj-http.client :as client]
+            [cheshire.core :as json]
+            [ring.mock.request :as mock])
   (:import [java.net InetAddress]))
 
 
@@ -27,7 +29,11 @@
                        :body    (json/encode {:service name
                                               :path    (:uri req)})})
                     {:port port})]
-    (swap! services assoc name #(stopper :timeout 100))))
+    (swap! services assoc name stopper)))
+
+(defn start-proxy []
+  (let [stopper (server/start [foo-service-config bar-service-config])]
+    (swap! services assoc "main" stopper)))
 
 (defn stop-services []
   (doseq [[name f] @services]
@@ -38,11 +44,31 @@
   (try
     (start-json-service "foo" 8999)
     (start-json-service "bar" 8998)
+    (start-proxy)
+    (Thread/sleep 500)
     (f)
     (finally
       (stop-services))))
 
+(defmacro with-services [& body]
+  `(with-services* (fn [] ~@body)))
+
 (use-fixtures :once with-services*)
 
-(deftest test-proxy
-  (is (= 0 1 "I'm too tired to write any tests today")))
+
+(deftest test-routing
+  (let [router (server/build-router [foo-service-config bar-service-config])
+        get (fn [url]
+              (router (mock/request :get url)))]
+    (is (= {:service "foo"
+            :path    "/blah"} (get "http://localhost:8080/blah")))
+    (is (= {:service "bar"
+            :path    "/flup"} (get (str "http://" (hostname) ":8080/flup"))))))
+
+#_(deftest test-proxy
+  (let [get (fn [url]
+              (:body (client/get url {:timeout 500 :as :json})))]
+    (is (= {:service "foo"
+            :path    "/blah"} (get "http://localhost:8080/blah")))
+    (is (= {:service "bar"
+            :path    "/flup"} (get (str "http://" (hostname) ":8080/flup"))))))

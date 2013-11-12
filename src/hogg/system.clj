@@ -4,7 +4,7 @@
 
 (defn system []
   {::server {:start (fn [system]
-                      (when-let [stopper (hogg.server/start)]
+                      (when-let [stopper (hogg.server/start [])]
                         (update-in system [::server] assoc
                                    :stop-fn  #(stopper :timeout 1000)
                                    :started? true)))

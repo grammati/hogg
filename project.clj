@@ -14,4 +14,6 @@
   :profiles
   {:dev {:source-paths ["dev"]
          :dependencies [[org.clojure/tools.namespace "0.2.4"]
-                        [org.clojure/tools.trace "0.7.6"]]}})
+                        [org.clojure/tools.trace "0.7.6"]
+                        [clj-http "0.7.7"]
+                        [ring-mock "0.1.5"]]}})

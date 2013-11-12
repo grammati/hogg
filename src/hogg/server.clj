@@ -6,33 +6,40 @@
             [http.async.client :as http]))
 
 
-(defn downstream-url [request]
-  (str "http://localhost:8999" (:uri request)))
-
 (defn proxy-websocket [request channel]
   (send! channel {:status 200 :body "websocket"} true))
 
-(defn proxy-http [request channel]
-  (let [url (downstream-url request)]
-    (client/request {:method  (:request-method request)
-                     :url     (downstream-url request)
-                     :headers (:headers request)
-                     :body    (:body request)
-                     :timeout 5000}
-                    (fn [{:keys [status headers body error] :as response}]
-                      (if error
-                        (send! channel {:status 500 :body "Proxy error"})
-                        (send! channel {:status status :headers (stringify-keys headers) :body body}))))))
+(defn proxy-http [request downstream-url]
+  (with-channel request channel
+    (let [url (str downstream-url (:uri request))]
+      (client/request {:method  (:request-method request)
+                       :url     url
+                       :headers (:headers request)
+                       :body    (:body request)
+                       :timeout 5000}
+                      (fn [{:keys [status headers body error] :as response}]
+                        (if error
+                          (send! channel {:status 500 :body "Proxy error"})
+                          (send! channel {:status status :headers (stringify-keys headers) :body body})))))))
+
+(defn build-router [[config & configs]]
+  (if config
+    (let [next (build-router configs)]
+      (fn [req]
+        (if (some #(= (:server-name req) %) (:hosts config))
+          (proxy-http req (first (:downstream config)))
+          (next req))))
+    (fn [req]
+      {:status 404 :body "Unknown host"})))
 
 (defn app [request]
-  (clojure.pprint/pprint request)
   (with-channel request channel
     (println "Connected: " channel)
     (if (websocket? channel)
       (proxy-websocket request channel)
       (proxy-http request channel))))
 
-(defn start []
-  (run-server #'app {:port 8080}))
+(defn start [configs]
+  (run-server (build-router configs) {:port 8080}))
 
 

@@ -9,23 +9,24 @@
 (defn proxy-websocket [request channel]
   (send! channel {:status 200 :body "websocket"} true))
 
-(defn proxy-http [request downstream-url]
-  (with-channel request channel
-    (let [url (str downstream-url (:uri request))]
-      (client/request {:method  (:request-method request)
-                       :url     url
-                       :headers (:headers request)
-                       :body    (:body request)
-                       :timeout 5000}
-                      (fn [{:keys [status headers body error] :as response}]
-                        (if error
-                          (send! channel {:status 500 :body "Proxy error"})
-                          (send! channel {:status status :headers (stringify-keys headers) :body body})))))))
+(defn proxy-http [request downstream-server]
+  (let [url (str downstream-server (:uri request))]
+    (println "proxying to " url)
+    @(client/request {:method  (:request-method request)
+                     :url     url
+                     :headers (:headers request)
+                     :body    (:body request)
+                     :timeout 5000}
+                    (fn [{:keys [status headers body error] :as response}]
+                      (if error
+                        {:status 500 :body "Proxy error"}
+                        {:status status :headers (stringify-keys headers) :body body})))))
 
 (defn build-router [[config & configs]]
   (if config
     (let [next (build-router configs)]
       (fn [req]
+        (println "Checking " config)
         (if (some #(= (:server-name req) %) (:hosts config))
           (proxy-http req (first (:downstream config)))
           (next req))))

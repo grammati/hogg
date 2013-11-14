@@ -59,7 +59,10 @@
 (deftest test-routing
   (let [router (server/build-router [foo-service-config bar-service-config])
         get (fn [url]
-              (router (mock/request :get url)))]
+              (-> (mock/request :get url)
+                  router
+                  :body
+                  (json/decode true)))]
     (is (= {:service "foo"
             :path    "/blah"} (get "http://localhost:8080/blah")))
     (is (= {:service "bar"

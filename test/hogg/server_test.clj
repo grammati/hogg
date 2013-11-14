@@ -56,22 +56,11 @@
 (use-fixtures :once with-services*)
 
 
-(deftest test-routing
-  (let [router (server/build-router [foo-service-config bar-service-config])
-        get (fn [url]
-              (-> (mock/request :get url)
-                  router
-                  :body
-                  (json/decode true)))]
-    (is (= {:service "foo"
-            :path    "/blah"} (get "http://localhost:8080/blah")))
-    (is (= {:service "bar"
-            :path    "/flup"} (get (str "http://" (hostname) ":8080/flup"))))))
-
-#_(deftest test-proxy
+(deftest test-proxy
   (let [get (fn [url]
               (:body (client/get url {:timeout 500 :as :json})))]
     (is (= {:service "foo"
             :path    "/blah"} (get "http://localhost:8080/blah")))
     (is (= {:service "bar"
             :path    "/flup"} (get (str "http://" (hostname) ":8080/flup"))))))
+

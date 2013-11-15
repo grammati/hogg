@@ -1,8 +1,11 @@
 (ns hogg.server-test
   (:require [clojure.test :refer :all]
+            [clojure.core.async :as async :refer [go-loop <!! >!! alts! alts!! alt! alt!!]]
+            [clojure.walk]
             [hogg.server :as server]
-            [org.httpkit.server :refer [run-server]]
+            [org.httpkit.server :refer [run-server with-channel websocket? send!]]
             [clj-http.client :as client]
+            [http.async.client :as async-client :refer [websocket]]
             [cheshire.core :as json]
             [ring.mock.request :as mock])
   (:import [java.net InetAddress]))
@@ -13,7 +16,8 @@
 
 (def foo-service-config
   {:hosts      ["localhost"]
-   :downstream ["http://localhost:8999"]})
+   :downstream ["http://localhost:8999"
+                "ws://localhost:8999"]})
 
 (def bar-service-config
   {:hosts [(hostname)]
@@ -21,14 +25,21 @@
 
 (def services (atom nil))
 
+(defn json-service-handler [name]
+  (fn [request]
+    (with-channel request channel
+      (let [body (json/encode {:service name
+                               :path    (:uri request)})]
+        (send! channel
+               (if (websocket? channel)
+                 body
+                 {:status 200
+                  :headers {"Content-Type" "application/json"}
+                  :body    body}))))))
+
 (defn start-json-service [name port]
-  (let [stopper
-        (run-server (fn [req]
-                      {:status 200
-                       :headers {"Content-Type" "application/json"}
-                       :body    (json/encode {:service name
-                                              :path    (:uri req)})})
-                    {:port port})]
+  (let [stopper (run-server (json-service-handler name)
+                            {:port port})]
     (swap! services assoc name stopper)))
 
 (defn start-proxy []
@@ -55,6 +66,7 @@
 
 (use-fixtures :once with-services*)
 
+(def client (delay (async-client/create-client)))
 
 (deftest test-proxy
   (let [get (fn [url]
@@ -64,3 +76,35 @@
     (is (= {:service "bar"
             :path    "/flup"} (get (str "http://" (hostname) ":8080/flup"))))))
 
+(defn ws-channels [url]
+  (let [r-ch (async/chan)
+        w-ch (async/chan)
+        ws   (websocket @client url
+                        :text (fn [soc t] (async/put! r-ch [:text t]))
+                        :byte (fn [soc b] (async/put! r-ch [:bytes b]))
+                        :open (fn [soc] (async/put! r-ch [:open soc]))
+                        :close (fn [ws code reason] (async/put! r-ch [:close ws code reason]))
+                        :error (fn [ws ex] (async/put! r-ch [:error ws ex]))
+                        )]
+    (go-loop [v (<! w-ch)]
+      (when (nil? v)
+        (async-client/close ws)
+        (async-client/send ws (if (string? v) :text :bytes) v)))
+    [r-ch w-ch]))
+
+;;; FIXME - put this elsewhere, if it pans out:
+(def eq-any (reify Object (equals [this other] true)))
+(defmacro is-match [expected result]
+  `(let [~'_ eq-any] (is (= ~expected ~result))))
+
+(deftest test-proxy-websocket
+  (let [[r w] (ws-channels "ws://localhost:8080/foo")]
+    (is-match [[:open _] _]
+              (alts!! [r (async/timeout 1000)]))
+    (loop []
+      (let [[[type val] chan] (alts!! [r (async/timeout 1000)])]
+        (println type val (count val))
+        (when (= chan r)
+          (recur))))
+    #_(is-match [[:text _] _]
+              (alts!! [r (async/timeout 1000)]))))

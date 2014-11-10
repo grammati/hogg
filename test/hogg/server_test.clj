@@ -4,6 +4,7 @@
             [clojure.walk]
             [hogg.server :as server]
             [org.httpkit.server :refer [run-server with-channel websocket? send!]]
+            [org.httpkit.timer :as timer]
             [clj-http.client :as client]
             [http.async.client :as async-client :refer [websocket]]
             [cheshire.core :as json]
@@ -30,12 +31,15 @@
     (with-channel request channel
       (let [body (json/encode {:service name
                                :path    (:uri request)})]
-        (send! channel
-               (if (websocket? channel)
-                 body
-                 {:status 200
-                  :headers {"Content-Type" "application/json"}
-                  :body    body}))))))
+        (timer/schedule-task
+         1
+         (send! channel
+                (if (websocket? channel)
+                  body
+                  {:status 200
+                   :headers {"Content-Type" "application/json"}
+                   :body    body}))
+         )))))
 
 (defn start-json-service [name port]
   (let [stopper (run-server (json-service-handler name)
@@ -87,7 +91,7 @@
                         :error (fn [ws ex] (async/put! r-ch [:error ws ex]))
                         )]
     (go-loop [v (<! w-ch)]
-      (when (nil? v)
+      (if (nil? v)
         (async-client/close ws)
         (async-client/send ws (if (string? v) :text :bytes) v)))
     [r-ch w-ch]))
@@ -101,10 +105,13 @@
   (let [[r w] (ws-channels "ws://localhost:8080/foo")]
     (is-match [[:open _] _]
               (alts!! [r (async/timeout 1000)]))
-    (loop []
-      (let [[[type val] chan] (alts!! [r (async/timeout 1000)])]
-        (println type val (count val))
-        (when (= chan r)
-          (recur))))
-    #_(is-match [[:text _] _]
-              (alts!! [r (async/timeout 1000)]))))
+    (let [[[type data] chan] (alts!! [r (async/timeout 1000)])]
+      (is (identical? r chan))
+      (is (= :text type))
+      (is (= {:service "foo" :path "/foo"} (json/decode data true))))
+    (loop [n 10]
+      (let [[[type data] chan] (alts!! [r (async/timeout 1000)])]
+        (println "got: " type data)
+        (when (and (= chan r) (pos? n))
+          (recur (dec n)))))
+    ))

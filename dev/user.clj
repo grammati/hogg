@@ -2,9 +2,9 @@
   (:require [clojure.repl :refer :all]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.namespace.repl :as repl]
-            [hogg.system :as system]))
+            #_[hogg.system :as system]))
 
-
+(comment
 (def system nil)
 
 (defn init []
@@ -23,3 +23,4 @@
 (defn reset []
   (stop)
   (repl/refresh :after 'user/go))
+)

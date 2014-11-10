@@ -3,6 +3,6 @@
   (:gen-class))
 
 (defn -main [& args]
-  (hogg.system/start))
+  (hogg.server/start))
 
 

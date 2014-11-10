@@ -17,7 +17,7 @@
                    "Sec-WebSocket-Accept" (server/accept key)}))
 
 (defn proxy-websocket [config request]
-  (let [downstream (rand-nth (filter #(.startsWith % "http:") (:downstream config)))
+  (let [downstream (rand-nth (filter #(.startsWith % "ws:") (:downstream config)))
         url        (str downstream (:uri request))
         channel    (:async-channel request)
         key        (get-in request [:headers "sec-websocket-key"])]
@@ -53,13 +53,13 @@
                                  {:status status :headers (stringify-keys headers) :body body})))))))
 
 (defn proxy-request [config request]
-  (if (websocket? request)
+  (if (websocket? (:async-channel request))
     (proxy-websocket config request)
     (proxy-http config request)))
 
 (defn matches? [config request]
   (and (some #(= (:server-name request) %) (:hosts config))
-       (if (websocket? request)
+       (if (websocket? (:async-channel request))
          (some #(.startsWith % "ws:") (:downstream config))
          (some #(.startsWith % "http:") (:downstream config)))))
 
@@ -72,8 +72,9 @@
           (proxy-request config request)
           (next request))))
     (fn [req]
-      {:status 404 :body "Unknown host"})))
+      {:status 404 :body "Not Found"})))
 
 (defn start [configs]
   (run-server (build-router configs) {:port 8080}))
+
 
